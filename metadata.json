@@ -1,0 +1,6 @@
+{
+  "name": "Daily Easy English 复习助手",
+  "description": "Daily Easy English Expression 英语表达复习与抽查小程序，支持按序号1-N排列、20词分组筛选、搜索、RSS自动同步、例句用法解析与随机抽查单词卡。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

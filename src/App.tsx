@@ -5,6 +5,7 @@ import { BatchRangeSelector } from './components/BatchRangeSelector';
 import { ExpressionCard } from './components/ExpressionCard';
 import { ExpressionDetailModal } from './components/ExpressionDetailModal';
 import { ImmersiveReviewModal } from './components/ImmersiveReviewModal';
+import { PRESEEDED_EXPRESSIONS } from './data/preseededExpressions';
 import {
   Loader2,
   Sparkles,
@@ -18,8 +19,14 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [expressions, setExpressions] = useState<Expression[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [expressions, setExpressions] = useState<Expression[]>(() => {
+    return PRESEEDED_EXPRESSIONS.map((exp) => ({
+      ...exp,
+      title: exp.phrase || exp.title,
+      phrase: exp.phrase || exp.title,
+    }));
+  });
+  const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeRangeStart, setActiveRangeStart] = useState<number | null>(1);
   const [activeRangeEnd, setActiveRangeEnd] = useState<number | null>(20); // Default to first 20 batch (1-20)
@@ -84,22 +91,22 @@ export default function App() {
 
   // Fetch expression list from backend
   const fetchExpressions = async () => {
-    setIsLoading(true);
     try {
       const params = new URLSearchParams();
       params.set('sort', sortOrder);
 
       const res = await fetch(`/api/expressions?${params.toString()}`);
-      const data = await res.json();
-
-      if (data.success && Array.isArray(data.data)) {
-        setExpressions(data.data);
-        if (data.maxEpisodeNumber) {
-          setMaxEpisodeNum(data.maxEpisodeNumber);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+          setExpressions(data.data);
+          if (data.maxEpisodeNumber) {
+            setMaxEpisodeNum(data.maxEpisodeNumber);
+          }
         }
       }
     } catch (err) {
-      console.error('Failed to load expressions from server:', err);
+      console.warn('Failed to load expressions from server, using preloaded data:', err);
     } finally {
       setIsLoading(false);
     }
@@ -112,18 +119,26 @@ export default function App() {
   // Sync RSS endpoint call
   const handleSyncRss = async () => {
     setIsSyncing(true);
+    setSyncToast('正在与 Daily Easy English 官方 RSS 节点同步...');
     try {
       const res = await fetch('/api/expressions/sync-rss');
-      const data = await res.json();
-      if (data.message) {
-        setSyncToast(data.message);
-        setTimeout(() => setSyncToast(null), 4000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.message) {
+          setSyncToast(data.message);
+        } else {
+          setSyncToast('RSS 同步完成！');
+        }
+        await fetchExpressions();
+      } else {
+        setSyncToast('RSS 节点响应超时，已维持现有数据库');
       }
-      await fetchExpressions();
     } catch (e) {
       console.error('RSS Sync error:', e);
+      setSyncToast('RSS 节点响应超时，已维持现有数据库');
     } finally {
       setIsSyncing(false);
+      setTimeout(() => setSyncToast(null), 4000);
     }
   };
 

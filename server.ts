@@ -126,8 +126,14 @@ let expressionsStore: Expression[] = PRESEEDED_EXPRESSIONS.map((exp) => {
   };
 });
 
-// 1. GET /api/expressions - Query expressions with sorting (1 to N chronological), range filter, search keyword
-app.get('/api/expressions', (req, res) => {
+const apiRouter = express.Router();
+
+apiRouter.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'Daily Easy English API Serverless Running' });
+});
+
+// 1. GET /expressions - Query expressions with sorting (1 to N chronological), range filter, search keyword
+apiRouter.get('/expressions', (req, res) => {
   try {
     const sort = (req.query.sort as string) || 'asc'; // 'asc' means Episode 1, 2, 3... N
     const q = ((req.query.q as string) || '').trim().toLowerCase();
@@ -170,7 +176,7 @@ app.get('/api/expressions', (req, res) => {
       list = list.filter((exp) => !exp.isMastered);
     }
 
-    // Sorting: Prompt requirement #1: "按照序号顺序排列（而这个网站的英语表达从上到下是从大到小，所以你需要把他倒过来）"
+    // Sorting
     list.sort((a, b) => {
       const aEp = a?.episodeNumber ?? 0;
       const bEp = b?.episodeNumber ?? 0;
@@ -194,8 +200,8 @@ app.get('/api/expressions', (req, res) => {
   }
 });
 
-// 2. GET /api/expressions/sync-rss - Fetch latest Daily Easy English Podcast RSS and merge new episodes
-app.get('/api/expressions/sync-rss', async (req, res) => {
+// 2. GET /expressions/sync-rss - Fetch latest Daily Easy English Podcast RSS and merge new episodes
+apiRouter.get('/expressions/sync-rss', async (req, res) => {
   try {
     const rssUrls = [
       'https://rss.libsyn.com/shows/54133/destinations/197908.xml',
@@ -272,7 +278,6 @@ app.get('/api/expressions/sync-rss', async (req, res) => {
         existingEpNumbers.add(epNum);
         newItemsCount++;
       } else {
-        // Update audio URL or clean existing entry phrase/title
         const existingIndex = expressionsStore.findIndex((e) => e.episodeNumber === epNum);
         if (existingIndex !== -1) {
           if (cleanPhrase && !cleanPhrase.startsWith('Expression #')) {
@@ -288,7 +293,6 @@ app.get('/api/expressions/sync-rss', async (req, res) => {
       }
     }
 
-    // Re-sort store
     expressionsStore.sort((a, b) => a.episodeNumber - b.episodeNumber);
 
     res.json({
@@ -308,8 +312,8 @@ app.get('/api/expressions/sync-rss', async (req, res) => {
   }
 });
 
-// 3. POST /api/expressions/enrich - Use Gemini 3.6 Flash to dynamically enrich an expression page
-app.get('/api/expressions/:id', (req, res) => {
+// 3. GET /expressions/:id
+apiRouter.get('/expressions/:id', (req, res) => {
   const exp = expressionsStore.find((e) => e.id === req.params.id || e.episodeNumber === parseInt(req.params.id, 10));
   if (!exp) {
     return res.status(404).json({ success: false, error: 'Expression not found' });
@@ -317,7 +321,8 @@ app.get('/api/expressions/:id', (req, res) => {
   res.json({ success: true, data: exp });
 });
 
-app.post('/api/expressions/enrich', async (req, res) => {
+// 4. POST /expressions/enrich - Use Gemini Flash to dynamically enrich an expression page
+apiRouter.post('/expressions/enrich', async (req, res) => {
   try {
     const { episodeNumber, phrase, context } = req.body;
 
@@ -452,8 +457,8 @@ Output strictly valid JSON adhering to this structure:
   }
 });
 
-// 4. POST /api/tts - Audio speech generation using Gemini TTS
-app.post('/api/tts', async (req, res) => {
+// 5. POST /tts - Audio speech generation using Gemini TTS
+apiRouter.post('/tts', async (req, res) => {
   try {
     const { text, voice } = req.body;
     if (!text) {
@@ -489,8 +494,8 @@ app.post('/api/tts', async (req, res) => {
   }
 });
 
-// 5. POST /api/expressions/immersive-context - Real-time AI context generation for immersive review
-app.post('/api/expressions/immersive-context', async (req, res) => {
+// 6. POST /expressions/immersive-context - Real-time AI context generation for immersive review
+apiRouter.post('/expressions/immersive-context', async (req, res) => {
   try {
     const { phrase, meaningCn, episodeNumber } = req.body;
     if (!phrase) {
@@ -552,6 +557,10 @@ app.post('/api/expressions/immersive-context', async (req, res) => {
     res.status(isQuota ? 429 : 500).json({ success: false, isQuotaExceeded: isQuota, error: friendlyMsg });
   }
 });
+
+// Mount apiRouter under both '/api' and '/'
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
 
 // Setup Vite Development Middleware or Production Static Serving
 async function startServer() {

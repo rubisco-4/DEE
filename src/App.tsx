@@ -116,29 +116,154 @@ export default function App() {
     fetchExpressions();
   }, [sortOrder]);
 
-  // Sync RSS endpoint call
+  // Sync RSS endpoint call with client-side CORS fallback
+  const fallbackClientSyncRss = async () => {
+    const urls = [
+      'https://api.allorigins.win/raw?url=https://rss.libsyn.com/shows/54133/destinations/197908.xml',
+      'https://corsproxy.io/?https://rss.libsyn.com/shows/54133/destinations/197908.xml',
+      'https://rss.libsyn.com/shows/54133/destinations/197908.xml',
+    ];
+
+    let xmlText = '';
+    for (const url of urls) {
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(tid);
+        if (res.ok) {
+          const txt = await res.text();
+          if (txt && txt.includes('<item>')) {
+            xmlText = txt;
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn('Client RSS fetch error on ' + url, e);
+      }
+    }
+
+    if (!xmlText) {
+      setSyncToast('RSS 节点响应超时，已维持现有数据库');
+      return;
+    }
+
+    try {
+      const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+      const items = Array.from(doc.querySelectorAll('item'));
+      let newCount = 0;
+
+      setExpressions((prev) => {
+        const existingEpNumbers = new Set(prev.map((e) => e.episodeNumber));
+        const updated = [...prev];
+
+        for (const item of items) {
+          const titleStr = item.querySelector('title')?.textContent || '';
+          const epMatch = titleStr.match(/\b(?:EE|EP|Episode|E)?\s*#?\s*(\d{1,4})\b/i);
+          const epNum = epMatch ? parseInt(epMatch[1], 10) : 0;
+          if (!epNum || epNum > 9000) continue;
+
+          let cleanPhrase = titleStr
+            .replace(/^(?:RE-?UP!?|FIXED|UPDATE!?|RE-?POST!?)\s*/i, '')
+            .replace(/^(?:Coach\s+Shane'?s\s+)?(?:Daily\s+Easy\s+English(?:\s+Expression|\s+Podcast)?|D\.?E\.?E\.?E?\.?)\s*/i, '')
+            .replace(/^(?:Lesson|Podcast|Episode|EP|EE|E)[\s:_–—\-\.~]*/i, '')
+            .replace(/^#?\d+[\s:_–—\-\.~]*/, '')
+            .replace(/^[:：_–—\-\.\~\s"'\u201c\u201d\u2018\u2019]+/g, '')
+            .replace(/[:：_–—\-\.\~\s"'\u201c\u201d\u2018\u2019]+$/g, '')
+            .trim();
+
+          if (!cleanPhrase || cleanPhrase.length < 2) {
+            cleanPhrase = `Expression #${epNum}`;
+          }
+
+          const desc = item.querySelector('description')?.textContent?.replace(/<[^>]*>?/gm, '') || '';
+          const enclosure = item.querySelector('enclosure');
+          const audioUrl = enclosure?.getAttribute('url') || '';
+          const pubDate = item.querySelector('pubDate')?.textContent || '';
+
+          if (!existingEpNumbers.has(epNum)) {
+            newCount++;
+            existingEpNumbers.add(epNum);
+            updated.push({
+              id: `dee-${epNum}`,
+              episodeNumber: epNum,
+              title: cleanPhrase,
+              phrase: cleanPhrase,
+              meaningCn: '可点击“AI深度解析”实时生成地道中文释义与例句',
+              category: 'Daily Life',
+              audioUrl,
+              pubDate,
+              description: desc,
+              examples: [
+                {
+                  english: `Example sentence for "${cleanPhrase}" in Episode ${epNum}.`,
+                  chinese: `第${epNum}期表达“${cleanPhrase}”的应用例句。`,
+                },
+              ],
+            });
+          } else {
+            const idx = updated.findIndex((e) => e.episodeNumber === epNum);
+            if (idx !== -1) {
+              if (cleanPhrase && !cleanPhrase.startsWith('Expression #')) {
+                updated[idx].title = cleanPhrase;
+                updated[idx].phrase = cleanPhrase;
+              }
+              if (audioUrl && !updated[idx].audioUrl) {
+                updated[idx].audioUrl = audioUrl;
+              }
+            }
+          }
+        }
+
+        updated.sort((a, b) => a.episodeNumber - b.episodeNumber);
+        return updated;
+      });
+
+      setMaxEpisodeNum((prevMax) => {
+        let max = prevMax;
+        for (const item of items) {
+          const t = item.querySelector('title')?.textContent || '';
+          const m = t.match(/\b(?:EE|EP|Episode|E)?\s*#?\s*(\d{1,4})\b/i);
+          const num = m ? parseInt(m[1], 10) : 0;
+          if (num > max && num < 9000) max = num;
+        }
+        return max;
+      });
+
+      setSyncToast(`🎉 官方 RSS 同步成功！${newCount > 0 ? `增量获取 ${newCount} 期最新表达` : '所有表达已是最新状态'}`);
+    } catch (e) {
+      console.error('Failed to parse client RSS XML:', e);
+      setSyncToast('RSS 解析失败，已维持现有数据库');
+    }
+  };
+
   const handleSyncRss = async () => {
     setIsSyncing(true);
     setSyncToast('正在与 Daily Easy English 官方 RSS 节点同步...');
     try {
-      const res = await fetch('/api/expressions/sync-rss');
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch('/api/expressions/sync-rss', { signal: controller.signal });
+      clearTimeout(tid);
+
       if (res.ok) {
         const data = await res.json();
-        if (data.message) {
+        if (data.message && !data.message.includes('Could not reach')) {
           setSyncToast(data.message);
+          await fetchExpressions();
         } else {
-          setSyncToast('RSS 同步完成！');
+          // Fallback to client-side CORS fetch if backend could not reach RSS
+          await fallbackClientSyncRss();
         }
-        await fetchExpressions();
       } else {
-        setSyncToast('RSS 节点响应超时，已维持现有数据库');
+        await fallbackClientSyncRss();
       }
     } catch (e) {
-      console.error('RSS Sync error:', e);
-      setSyncToast('RSS 节点响应超时，已维持现有数据库');
+      console.warn('Backend RSS sync timed out or failed, running client fallback...', e);
+      await fallbackClientSyncRss();
     } finally {
       setIsSyncing(false);
-      setTimeout(() => setSyncToast(null), 4000);
+      setTimeout(() => setSyncToast(null), 5000);
     }
   };
 

@@ -204,6 +204,7 @@ apiRouter.get('/expressions', (req, res) => {
 apiRouter.get('/expressions/sync-rss', async (req, res) => {
   try {
     const rssUrls = [
+      'https://api.allorigins.win/raw?url=https://rss.libsyn.com/shows/54133/destinations/197908.xml',
       'https://rss.libsyn.com/shows/54133/destinations/197908.xml',
       'http://feeds.libsyn.com/54133/rss',
     ];
@@ -211,7 +212,13 @@ apiRouter.get('/expressions/sync-rss', async (req, res) => {
     let xmlText = '';
     for (const url of rssUrls) {
       try {
-        const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const response = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
         if (response.ok) {
           xmlText = await response.text();
           if (xmlText && xmlText.includes('<item>')) break;
